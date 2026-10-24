@@ -3,14 +3,43 @@ using { asset.lifecycle as db } from '../db/schema';
 @(requires: 'authenticated-user')
 service AssetLifecycleService {
 
+    type CurrentUserContext {
+        role   : String;
+        userId : String;
+    }
+
+    function getCurrentUserContext() returns CurrentUserContext;
+
     @(requires: 'Admin')
     entity DepartmentsSrv as projection on db.Department;
 
     @(requires: ['Admin','Manager'])
     entity EmployeesSrv as projection on db.Employee;
 
-    @(requires: ['Admin','Manager'])
+    @restrict: [
+        { grant: 'READ', to: ['Admin', 'Manager'] },
+        { grant: ['CREATE', 'UPDATE', 'DELETE'], to: 'Admin' }
+    ]
     entity VendorsSrv as projection on db.Vendor;
+
+    @(requires: 'Admin')
+    action createVendor(
+        vendor_id : UUID,
+        name      : String,
+        email     : String
+    ) returns array of VendorsSrv;
+
+    @(requires: 'Admin')
+    action updateVendor(
+        vendor_id : UUID,
+        name      : String,
+        email     : String
+    ) returns String;
+
+    @(requires: 'Admin')
+    action deleteVendor(
+        vendor_id : UUID
+    ) returns String;
 
     @(requires: ['Admin','Manager'])
     entity AssetCategoriesSrv as projection on db.AssetCategory;
@@ -153,6 +182,8 @@ service AssetLifecycleService {
     @(requires: ['Admin','Manager'])
     action createAssetAssignment(
         assignment_id        : UUID,
+        asset_tag            : String,
+        employee_email       : String,
         assigned_date        : DateTime,
         expected_return_date : DateTime,
         assignment_status    : String,
@@ -216,5 +247,3 @@ service AssetLifecycleService {
         archive_id : UUID
     ) returns String;
 }
-
-

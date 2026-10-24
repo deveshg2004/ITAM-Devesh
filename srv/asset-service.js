@@ -5,11 +5,27 @@ module.exports = cds.service.impl(async function () {
         const {
         DepartmentsSrv,
         EmployeesSrv,
+        VendorsSrv,
         AssetsSrv,
         MaintenanceRecordsSrv,
         AssetAssignmentsSrv,
         ArchiveRecordsSrv
     } = this.entities;
+
+    this.on('getCurrentUserContext', (req) => {
+        const role = req.user.is('Admin')
+            ? 'Admin'
+            : req.user.is('Manager')
+                ? 'Manager'
+                : req.user.is('Employee')
+                    ? 'Employee'
+                    : 'Unknown';
+
+        return {
+            role,
+            userId: req.user.id
+        };
+    });
     
     this.before('createEmployee', async (req) => {
 
@@ -20,6 +36,18 @@ module.exports = cds.service.impl(async function () {
     }
 
 });
+
+    this.before(['CREATE', 'UPDATE'], VendorsSrv, async (req) => {
+        const { name, email } = req.data;
+
+        if (req.event === 'CREATE' && (!name || !name.trim())) {
+            req.error(400, 'Vendor name is required');
+        }
+
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            req.error(400, 'Invalid vendor email address');
+        }
+    });
 
 
 this.before('createAsset', async (req) => {
@@ -91,6 +119,42 @@ this.before('createMaintenanceRecord', async (req) => {
 
         return `Maintenance record ${maintenanceId} completed successfully`;
     });
+
+    // Vendor CRUD
+
+    this.on('createVendor', async (req) => {
+        const data = req.data;
+        const tx = cds.tx(req);
+
+        await tx.run(
+            INSERT.into(VendorsSrv).entries(data)
+        );
+
+        return await tx.read(VendorsSrv)
+            .where({ vendor_id: data.vendor_id });
+    });
+
+    this.on('updateVendor', async (req) => {
+        const { vendor_id, name, email } = req.data;
+        const tx = cds.tx(req);
+
+        await tx.update(VendorsSrv)
+            .with({ name, email })
+            .where({ vendor_id });
+
+        return 'Vendor updated successfully';
+    });
+
+    this.on('deleteVendor', async (req) => {
+        const { vendor_id } = req.data;
+        const tx = cds.tx(req);
+
+        await tx.delete(VendorsSrv)
+            .where({ vendor_id });
+
+        return 'Vendor deleted successfully';
+    });
+
         this.on('createEmployee', async (req) => {
 
         const data = req.data;
@@ -219,15 +283,78 @@ this.before('createMaintenanceRecord', async (req) => {
 
     this.on('createAssetAssignment', async (req) => {
 
-        const data = req.data;
+        const {
+            assignment_id,
+            asset_tag,
+            employee_email,
+            assigned_date,
+            expected_return_date,
+            assignment_status,
+            remarks
+        } = req.data;
+
         const tx = cds.tx(req);
 
+        const assets = await tx.read(AssetsSrv)
+            .columns('asset_id', 'asset_tag', 'status')
+            .where({ asset_tag });
+
+        if (!assets.length) {
+            return req.error(400, `Asset ${asset_tag} was not found`);
+        }
+
+        const asset = assets[0];
+
+        if (asset.status !== 'AVAILABLE') {
+            return req.error(400, `Asset ${asset_tag} is not available for assignment`);
+        }
+
+        const employees = await tx.read(EmployeesSrv)
+            .columns('employee_id', 'full_name', 'email', 'status')
+            .where({ email: employee_email });
+
+        if (!employees.length) {
+            return req.error(400, `Employee ${employee_email} was not found`);
+        }
+
+        const employee = employees[0];
+
+        if (employee.status !== 'ACTIVE') {
+            return req.error(400, `Employee ${employee_email} is not active`);
+        }
+
+        const existingAssignments = await tx.read(AssetAssignmentsSrv)
+            .columns('assignment_id')
+            .where({
+                asset_asset_id: asset.asset_id,
+                assignment_status: 'ASSIGNED'
+            });
+
+        if (existingAssignments.length) {
+            return req.error(400, `Asset ${asset_tag} is already assigned`);
+        }
+
         await tx.run(
-            INSERT.into(AssetAssignmentsSrv).entries(data)
+            INSERT.into(AssetAssignmentsSrv).entries({
+                assignment_id,
+                asset_asset_id: asset.asset_id,
+                employee_employee_id: employee.employee_id,
+                assigned_date,
+                expected_return_date,
+                assignment_status,
+                remarks
+            })
         );
 
+        await tx.update(AssetsSrv)
+            .with({
+                status: 'ASSIGNED',
+                current_holder_employee_id: employee.employee_id
+            })
+            .where({ asset_id: asset.asset_id });
+
         return await tx.read(AssetAssignmentsSrv)
-            .where({ assignment_id: data.assignment_id });
+            .where({ assignment_id });
 
     });
 

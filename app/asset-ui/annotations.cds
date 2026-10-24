@@ -247,3 +247,9 @@ annotate service.AssetsSrv with {
     }
 };
 
+annotate service.AssetsSrv with {
+    asset_tag @Search.defaultSearchElement : true;
+    serial_number @Search.defaultSearchElement : true;
+    model @Search.defaultSearchElement : true;
+    status @Search.defaultSearchElement : true;
+};
